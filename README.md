@@ -1,4 +1,11 @@
 # Socket.IO-client.java
+
+#####VicV flavor
+
+Basically ripped everything out to add this as a submodule in android studio, but not as a module.
+
+Why? So I can make an android LIBRARY project that contains this instead of requiring transitive dependencies.
+
 [![Build Status](https://travis-ci.org/nkzawa/socket.io-client.java.png?branch=master)](https://travis-ci.org/nkzawa/socket.io-client.java)
 
 This is the Socket.IO v1.0 Client Library for Java, which is simply ported from the [JavaScript client](https://github.com/LearnBoost/socket.io-client).
