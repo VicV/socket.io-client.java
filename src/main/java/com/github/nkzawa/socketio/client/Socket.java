@@ -164,7 +164,7 @@ public class Socket extends Emitter {
                     return;
                 }
 
-                List<Object> _args = new ArrayList<Object>(args.length + 1);
+                List<Object> _args = new ArrayList<>(args.length + 1);
                 _args.add(event);
                 _args.addAll(Arrays.asList(args));
 
