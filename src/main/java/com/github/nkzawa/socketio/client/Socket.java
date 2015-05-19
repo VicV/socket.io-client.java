@@ -68,8 +68,9 @@ public class Socket extends Emitter {
         put(EVENT_RECONNECTING, 1);
     }};
 
-    private boolean connected;
-    private boolean disconnected = true;
+    /*package*/ String id;
+
+    private volatile boolean connected;
     private int ids;
     private String nsp;
     private Manager io;
@@ -81,10 +82,11 @@ public class Socket extends Emitter {
     public Socket(Manager io, String nsp) {
         this.io = io;
         this.nsp = nsp;
-        this.subEvents();
     }
 
     private void subEvents() {
+        if (this.subs != null) return;
+
         final Manager io = Socket.this.io;
         Socket.this.subs = new LinkedList<On.Handle>() {{
             add(On.on(io, Manager.EVENT_OPEN, new Listener() {
@@ -117,7 +119,8 @@ public class Socket extends Emitter {
             public void run() {
                 if (Socket.this.connected) return;
 
-                Socket.this.io.open();
+                Socket.this.subEvents();
+                Socket.this.io.open(); // ensure open
                 if (Manager.ReadyState.OPEN == Socket.this.io.readyState) Socket.this.onopen();
             }
         });
@@ -172,8 +175,7 @@ public class Socket extends Emitter {
                 for (Object arg : _args) {
                     jsonArgs.put(arg);
                 }
-                int parserType = Parser.EVENT;
-                if (HasBinary.hasBinary(jsonArgs)) { parserType = Parser.BINARY_EVENT; }
+                int parserType = HasBinary.hasBinary(jsonArgs) ? Parser.BINARY_EVENT : Parser.EVENT;
                 Packet<JSONArray> packet = new Packet<JSONArray>(parserType, jsonArgs);
 
                 if (_args.get(_args.size() - 1) instanceof Ack) {
@@ -228,7 +230,13 @@ public class Socket extends Emitter {
                         addAll(Arrays.asList(args));
                     }
                 }};
-                Packet<JSONArray> packet = new Packet<JSONArray>(Parser.EVENT, new JSONArray(_args));
+                
+                JSONArray jsonArgs = new JSONArray();
+                for (Object _arg : _args) {
+                    jsonArgs.put(_arg);
+                }
+                int parserType = HasBinary.hasBinary(jsonArgs) ? Parser.BINARY_EVENT : Parser.EVENT;
+                Packet<JSONArray> packet = new Packet<JSONArray>(parserType, jsonArgs);
 
                 logger.fine(String.format("emitting packet with ack id %d", ids));
                 Socket.this.acks.put(ids, ack);
@@ -256,7 +264,7 @@ public class Socket extends Emitter {
     private void onclose(String reason) {
         logger.fine(String.format("close (%s)", reason));
         this.connected = false;
-        this.disconnected = true;
+        this.id = null;
         this.emit(EVENT_DISCONNECT, reason);
     }
 
@@ -304,7 +312,8 @@ public class Socket extends Emitter {
         }
 
         if (this.connected) {
-            String event = (String)args.remove(0);
+            if (args.size() == 0) return;
+            String event = args.remove(0).toString();
             super.emit(event, args.toArray());
         } else {
             this.receiveBuffer.add(args);
@@ -342,7 +351,6 @@ public class Socket extends Emitter {
 
     private void onconnect() {
         this.connected = true;
-        this.disconnected = false;
         this.emit(EVENT_CONNECT);
         this.emitBuffered();
     }
@@ -369,8 +377,12 @@ public class Socket extends Emitter {
     }
 
     private void destroy() {
-        for (On.Handle sub : this.subs) {
-            sub.destroy();
+        if (this.subs != null) {
+            // clean subscriptions to avoid reconnection
+            for (On.Handle sub : this.subs) {
+                sub.destroy();
+            }
+            this.subs = null;
         }
 
         this.io.destroy(this);
@@ -385,14 +397,16 @@ public class Socket extends Emitter {
         EventThread.exec(new Runnable() {
             @Override
             public void run() {
-                if (!Socket.this.connected) return;
-
-                logger.fine(String.format("performing disconnect (%s)", Socket.this.nsp));
-                Socket.this.packet(new Packet(Parser.DISCONNECT));
+                if (Socket.this.connected) {
+                    logger.fine(String.format("performing disconnect (%s)", Socket.this.nsp));
+                    Socket.this.packet(new Packet(Parser.DISCONNECT));
+                }
 
                 Socket.this.destroy();
 
-                Socket.this.onclose("io client disconnect");
+                if (Socket.this.connected) {
+                    Socket.this.onclose("io client disconnect");
+                }
             }
         });
         return this;
@@ -408,7 +422,22 @@ public class Socket extends Emitter {
     }
 
     public Manager io() {
-        return io;
+        return this.io;
+    }
+
+    public boolean connected() {
+        return this.connected;
+    }
+
+    /**
+     * A property on the socket instance that is equal to the underlying engine.io socket id.
+     *
+     * The value is present once the socket has connected, is removed when the socket disconnects and is updated if the socket reconnects.
+     *
+     * @return a socket id
+     */
+    public String id() {
+        return this.id;
     }
 
     private static Object[] toArray(JSONArray array) {
